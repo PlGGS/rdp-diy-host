@@ -1895,6 +1895,18 @@ impl Connection {
         if !self.check_trusted_device().await {
             return false;
         }
+        #[cfg(all(feature = "rdpdiy", target_os = "macos"))]
+        if self.file_transfer.is_none()
+            && !self.is_port_forward()
+            && !self.view_camera
+            && !self.terminal
+        {
+            if let Some(err) = crate::rdpdiy::screen_capture_error() {
+                log::error!("refusing a session: {err}");
+                self.send_login_error(err).await;
+                return false;
+            }
+        }
         if let Some(keep_alive) = self.prepare_terminal_login_for_authorization().await {
             return keep_alive;
         }

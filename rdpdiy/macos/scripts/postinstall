@@ -1,0 +1,167 @@
+#!/bin/sh
+# Registers rdp.diy Host with launchd, the same way RustDesk's own installer does:
+#   LaunchDaemon (root)  .../MacOS/service          IPC hub, config, deploy
+#   LaunchAgent  (user)  .../MacOS/rdpdiy-host --server   screen capture and input, one per
+#                                                       login session and the login window
+# The plist names must match what the binary looks for (crate::get_full_name()).
+# Unlike RustDesk's agent, ours restarts after a clean exit too: System Settings quits it
+# with a normal quit after a permission change, and with no UI nothing else would start it.
+set -eu
+APP=/Applications/rdpdiy-host.app
+BIN="$APP/Contents/MacOS"
+DAEMON=diy.rdp.rdpdiy-host_service
+AGENT=diy.rdp.rdpdiy-host_server
+DAEMON_PLIST=/Library/LaunchDaemons/$DAEMON.plist
+AGENT_PLIST=/Library/LaunchAgents/$AGENT.plist
+
+chown -R root:wheel "$APP"
+chmod -R go-w "$APP"
+xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
+
+cat > "$DAEMON_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>$DAEMON</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<string>diy.rdp.host</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>$BIN/service</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>$BIN/</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>1</integer>
+	<key>StandardOutPath</key>
+	<string>/var/log/rdpdiy-host_service.out</string>
+	<key>StandardErrorPath</key>
+	<string>/var/log/rdpdiy-host_service.err</string>
+</dict>
+</plist>
+EOF
+
+cat > "$AGENT_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>$AGENT</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<string>diy.rdp.host</string>
+	<key>LimitLoadToSessionType</key>
+	<array>
+		<string>LoginWindow</string>
+		<string>Aqua</string>
+	</array>
+	<key>ProgramArguments</key>
+	<array>
+		<string>$BIN/rdpdiy-host</string>
+		<string>--server</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>$BIN/</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>1</integer>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+</dict>
+</plist>
+EOF
+chown root:wheel "$DAEMON_PLIST" "$AGENT_PLIST"
+chmod 644 "$DAEMON_PLIST" "$AGENT_PLIST"
+
+# A wrapper, not a symlink: --deploy and --password check that the running binary is the
+# one inside /Applications.
+mkdir -p /usr/local/bin
+printf '#!/bin/sh\nexec %s "$@"\n' "$BIN/rdpdiy-host" > /usr/local/bin/rdpdiy-host
+chmod 755 /usr/local/bin/rdpdiy-host
+
+launchctl bootstrap system "$DAEMON_PLIST" 2>/dev/null || launchctl kickstart -k "system/$DAEMON"
+
+# launchd starts the agent by itself at the next login (and at the login window); start it
+# now in the session that is already open.
+uid=$(stat -f %u /dev/console)
+user=$(stat -f %Su /dev/console)
+if [ "$uid" != 0 ]; then
+	launchctl bootstrap "gui/$uid" "$AGENT_PLIST" 2>/dev/null || launchctl kickstart -k "gui/$uid/$AGENT" || true
+fi
+
+i=0
+until [ -n "$("$BIN/rdpdiy-host" --get-id 2>/dev/null)" ] || [ $i -ge 15 ]; do sleep 1; i=$((i + 1)); done
+
+# One-click installs: the console names each download rdpdiy-host-installer-<token>.pkg, and
+# $1 is the path of the package that was opened (with any " (1)" a browser added).
+token=$(basename "${1:-}" | grep -oE 'rdpd_[A-Za-z0-9_-]{32}' | head -n 1 || true)
+enroll_failed=
+if [ -n "$token" ]; then
+	echo "rdp.diy Host: enrolling this Mac"
+	if ! out=$("$BIN/rdpdiy-host" --deploy --token "$token" 2>&1); then
+		echo "rdp.diy Host: enrolling failed: $out"
+		enroll_failed=1
+	fi
+fi
+
+ask() {
+	launchctl asuser "$uid" sudo -u "$user" osascript \
+		-e 'on run {msg, icon}' \
+		-e 'tell me to activate' \
+		-e 'text returned of (display dialog msg default answer "" with hidden answer with title "rdp.diy Host" buttons {"Skip", "OK"} default button "OK" cancel button "Skip" with icon POSIX file icon)' \
+		-e 'end run' "$1" "$APP/Contents/Resources/AppIcon.icns" 2>/dev/null
+}
+
+say() {
+	launchctl asuser "$uid" sudo -u "$user" osascript \
+		-e 'on run {msg}' -e 'tell me to activate' \
+		-e 'display dialog msg with title "rdp.diy Host" buttons {"OK"} default button "OK"' \
+		-e 'end run' "$1" >/dev/null 2>&1 || true
+}
+
+# Installer tokens last an hour. The Mac is installed either way, so a fresh download only
+# has to enroll it.
+if [ -n "$enroll_failed" ] && [ "$uid" != 0 ]; then
+	case $out in
+		*expired*) say "This installer has expired. Download a new one from rdp.diy and open it." ;;
+		*)
+			msg=$(printf '%s' "$out" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')
+			say "This Mac couldn't be added to your team. ${msg:-Check its internet connection, then download a new installer from rdp.diy and open it.}"
+			;;
+	esac
+fi
+
+# Installer.app (not `installer`/Homebrew/MDM, which have --password): pick the password
+# people connect with, like Chrome Remote Desktop's PIN. Skip keeps the current one.
+# Skipped when enrolling failed: the replacement installer asks.
+if [ "$uid" != 0 ] && [ -z "${COMMAND_LINE_INSTALL:-}" ] && [ -z "$enroll_failed" ]; then
+	prompt="Choose a password for connecting to this Mac from rdp.diy (at least 8 characters)."
+	while pw=$(ask "$prompt"); do
+		if [ ${#pw} -lt 8 ]; then
+			prompt="That password is too short. Use at least 8 characters."
+			continue
+		fi
+		again=$(ask "Enter the password again.") || break
+		if [ "$pw" = "$again" ]; then
+			# Prints "Done!" on success; errors exit 0 too.
+			[ "$("$BIN/rdpdiy-host" --password "$pw" 2>&1)" = "Done!" ] || say "The password couldn't be saved. Set it later with: sudo rdpdiy-host --password '<password>'"
+			break
+		fi
+		prompt="The passwords didn't match. Choose a password for connecting to this Mac."
+	done
+fi
+
+# A PPPC profile (MDM) grants these up front, in which case this returns without prompting.
+if [ "$uid" != 0 ]; then
+	launchctl asuser "$uid" sudo -u "$user" open -g -a "$APP" --args --permissions || true
+fi
+exit 0

@@ -26,10 +26,15 @@ fn main() -> std::process::ExitCode {
     unsafe {
         winapi::um::shellscalingapi::SetProcessDpiAwareness(2);
     }
+    #[cfg(feature = "rdpdiy")]
+    rdpdiy::init();
     // Preserve command failures, notably verified macOS offline update failures,
     // as a non-zero process exit status for CLI callers.
     let exit_code = match crate::core_main::core_main() {
         Some(crate::core_main::CoreMainAction::StartUi(mut args)) => {
+            #[cfg(feature = "rdpdiy")]
+            rdpdiy::no_ui(&mut args);
+            #[cfg(not(feature = "rdpdiy"))]
             ui::start(&mut args);
             std::process::ExitCode::SUCCESS
         }

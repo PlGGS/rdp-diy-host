@@ -29,6 +29,8 @@ pub mod ipc;
     feature = "flutter"
 )))]
 pub mod ui;
+#[cfg(feature = "rdpdiy")]
+pub mod rdpdiy;
 pub(crate) mod update_metadata;
 pub(crate) mod update_hash;
 #[cfg(target_os = "macos")]

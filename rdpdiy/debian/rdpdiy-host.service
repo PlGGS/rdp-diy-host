@@ -1,0 +1,18 @@
+[Unit]
+Description=rdp.diy Host
+Requires=network.target
+After=systemd-user-sessions.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/rdpdiy-host --service
+ExecStop=/usr/bin/pkill -f "rdpdiy-host --"
+PIDFile=/run/rdpdiy-host.pid
+KillMode=mixed
+TimeoutStopSec=30
+User=root
+LimitNOFILE=100000
+Environment="PULSE_LATENCY_MSEC=60" "PIPEWIRE_LATENCY=1024/48000"
+
+[Install]
+WantedBy=multi-user.target

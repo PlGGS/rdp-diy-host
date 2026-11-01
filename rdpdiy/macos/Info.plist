@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>rdpdiy-host</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>diy.rdp.host</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>rdpdiy-host</string>
+	<key>CFBundleDisplayName</key>
+	<string>rdp.diy Host</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@VERSION@</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>@MIN_MACOS@</string>
+	<!-- Background service: no Dock icon, no menu bar. -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Based on RustDesk (AGPL-3.0). Source: https://github.com/PlGGS/rdp-diy-host</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>rdp.diy Host uses System Events to restart its background service.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>rdp.diy Host can send this computer's audio to the person connected to it.</string>
+</dict>
+</plist>

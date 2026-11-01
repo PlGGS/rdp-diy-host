@@ -1,0 +1,110 @@
+# Builds the rdp.diy Host macOS installers (rdpdiy/build-macos.sh + rdpdiy/package-macos.sh).
+# Pushing a tag rdpdiy-<version> attaches them to a GitHub release.
+#
+# Repository variables: RDPDIY_ID_SERVER, RDPDIY_RELAY_SERVER, RDPDIY_API_SERVER, RDPDIY_KEY
+# Secrets (optional; without them the .pkg is ad-hoc signed and not notarized):
+#   MACOS_CERTS_P12        base64 .p12 holding "Developer ID Application" + "Developer ID Installer"
+#   MACOS_CERTS_PASSWORD   its password
+#   MACOS_SIGN_APP         e.g. "Developer ID Application: Name (TEAMID)"
+#   MACOS_SIGN_PKG         e.g. "Developer ID Installer: Name (TEAMID)"
+#   NOTARY_KEY_P8 / NOTARY_KEY_ID / NOTARY_ISSUER   App Store Connect API key for notarytool
+name: rdp.diy Host macOS
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["rdpdiy-*"]
+
+env:
+  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+  MACOSX_DEPLOYMENT_TARGET: "10.14"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, arch: arm64, triplet: arm64-osx }
+          - { os: macos-15-intel, arch: x86_64, triplet: x64-osx }
+    runs-on: ${{ matrix.os }}
+    env:
+      HAS_CERTS: ${{ secrets.MACOS_CERTS_P12 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install NASM 2.x
+        if: matrix.arch == 'x86_64'
+        run: |
+          curl -fsSLO https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/macosx/nasm-2.16.03-macosx.zip
+          unzip -q nasm-2.16.03-macosx.zip
+          sudo cp nasm-2.16.03/nasm /usr/local/bin/nasm
+
+      - name: Install Rust
+        run: rustup toolchain install 1.81 --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: rdpdiy-${{ matrix.os }}
+
+      - uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          runVcpkgInstall: false
+
+      - name: Build codec libraries
+        working-directory: ${{ runner.temp }}
+        run: $VCPKG_ROOT/vcpkg install --classic libvpx:${{ matrix.triplet }} libyuv:${{ matrix.triplet }} opus:${{ matrix.triplet }} aom:${{ matrix.triplet }}
+
+      - name: Build
+        env:
+          RDPDIY_ID_SERVER: ${{ vars.RDPDIY_ID_SERVER }}
+          RDPDIY_RELAY_SERVER: ${{ vars.RDPDIY_RELAY_SERVER }}
+          RDPDIY_API_SERVER: ${{ vars.RDPDIY_API_SERVER }}
+          RDPDIY_KEY: ${{ vars.RDPDIY_KEY }}
+        run: rdpdiy/build-macos.sh ${{ matrix.arch }} target/rdpdiy-macos
+
+      - name: Import signing certificates
+        if: env.HAS_CERTS == 'true'
+        env:
+          MACOS_CERTS_P12: ${{ secrets.MACOS_CERTS_P12 }}
+          MACOS_CERTS_PASSWORD: ${{ secrets.MACOS_CERTS_PASSWORD }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+        run: |
+          kc=$RUNNER_TEMP/sign.keychain-db pw=$(uuidgen)
+          echo "$MACOS_CERTS_P12" | base64 --decode > "$RUNNER_TEMP/certs.p12"
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 3600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          security import "$RUNNER_TEMP/certs.p12" -k "$kc" -P "$MACOS_CERTS_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productbuild
+          security set-key-partition-list -S apple-tool:,apple: -k "$pw" "$kc" >/dev/null
+          security list-keychains -d user -s "$kc" login.keychain
+          if [ -n "$NOTARY_KEY_P8" ]; then
+            echo "$NOTARY_KEY_P8" > "$RUNNER_TEMP/notary.p8"
+            xcrun notarytool store-credentials rdpdiy --key "$RUNNER_TEMP/notary.p8" \
+              --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --keychain "$kc"
+            echo "RDPDIY_NOTARY_PROFILE=rdpdiy" >> "$GITHUB_ENV"
+          fi
+
+      - name: Package
+        env:
+          RDPDIY_SIGN_APP: ${{ secrets.MACOS_SIGN_APP }}
+          RDPDIY_SIGN_PKG: ${{ secrets.MACOS_SIGN_PKG }}
+        run: rdpdiy/package-macos.sh target/rdpdiy-macos dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rdpdiy-host-macos-${{ matrix.arch }}
+          path: dist/*.pkg
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "rdp.diy Host ${GITHUB_REF_NAME#rdpdiy-}" --notes "" || true
+          gh release upload "$GITHUB_REF_NAME" dist/*.pkg --clobber

@@ -2848,6 +2848,11 @@ pub async fn test_ipv6() -> Option<tokio::task::JoinHandle<()>> {
     });
     */
 
+    #[cfg(feature = "rdpdiy")]
+    if !crate::rdpdiy::allow_public_stun() {
+        return None;
+    }
+
     Some(tokio::spawn(async {
         use hbb_common::futures::future::{select_ok, FutureExt};
         let tests = hbb_common::webrtc::WebRTCStream::default_stun_servers()
