@@ -9,7 +9,7 @@ Purslane Tech Pte. Ltd. "RustDesk" is their name; this build does not use it as 
 
 ## License and modifications (AGPL-3.0 §5)
 
-This is a modified version of RustDesk 1.5.0, licensed under the GNU Affero General Public
+This is a modified version of RustDesk 1.5.1, licensed under the GNU Affero General Public
 License v3.0 like the original (see `LICENCE`). Upstream copyright notices are kept.
 
 Modified by rdp.diy, starting 2026-10-19:
