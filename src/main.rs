@@ -26,7 +26,12 @@ fn main() {
     unsafe {
         winapi::um::shellscalingapi::SetProcessDpiAwareness(2);
     }
+    #[cfg(feature = "rdpdiy")]
+    rdpdiy::init();
     if let Some(args) = crate::core_main::core_main().as_mut() {
+        #[cfg(feature = "rdpdiy")]
+        rdpdiy::no_ui(args);
+        #[cfg(not(feature = "rdpdiy"))]
         ui::start(args);
     }
     common::global_clean();

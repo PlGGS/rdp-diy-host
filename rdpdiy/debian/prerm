@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+if [ -d /run/systemd/system ]; then
+	systemctl stop rdpdiy-host || true
+	systemctl disable rdpdiy-host || true
+fi

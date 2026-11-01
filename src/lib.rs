@@ -29,6 +29,8 @@ pub mod ipc;
     feature = "flutter"
 )))]
 pub mod ui;
+#[cfg(feature = "rdpdiy")]
+pub mod rdpdiy;
 mod version;
 pub use version::*;
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]

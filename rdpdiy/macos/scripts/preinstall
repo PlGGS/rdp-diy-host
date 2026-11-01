@@ -1,0 +1,11 @@
+#!/bin/sh
+# Stops a running rdp.diy Host before its files are replaced.
+DAEMON=diy.rdp.rdpdiy-host_service
+AGENT=diy.rdp.rdpdiy-host_server
+launchctl bootout "system/$DAEMON" 2>/dev/null || true
+for uid in $(ps -axo uid=,comm= | awk '$2 ~ /loginwindow$/ { print $1 }' | sort -u); do
+	launchctl bootout "gui/$uid/$AGENT" 2>/dev/null || true
+done
+pkill -x rdpdiy-host 2>/dev/null || true
+pkill -f '/rdpdiy-host.app/Contents/MacOS/service' 2>/dev/null || true
+exit 0
